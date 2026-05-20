@@ -1,0 +1,18 @@
+app:
+  name: jka_antivirus
+  data_dir: ./data
+  log_level: INFO
+
+database:
+  path: ./data/jka.db
+
+quarantine:
+  vault_path: ./data/quarantine
+  retention_days: 30
+
+# Future sections (populated in later phases):
+static: {}
+behavioral: {}
+network: {}
+cloud: {}
+ml: {}
