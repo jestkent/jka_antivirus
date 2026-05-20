@@ -8,6 +8,7 @@ from typing import Annotated
 
 import typer
 from rich.console import Console
+from rich.progress import BarColumn, Progress, SpinnerColumn, TextColumn, TimeElapsedColumn
 from rich.table import Table
 
 from jka_antivirus.config import load_settings
@@ -19,7 +20,7 @@ app = typer.Typer(
     help="jka_antivirus: layered Windows antivirus engine.",
     add_completion=True,
 )
-quarantine_app = typer.Typer(help="Quarantine vault management (Phase 2+).")
+quarantine_app = typer.Typer(help="Quarantine vault management (Phase 3+).")
 app.add_typer(quarantine_app, name="quarantine")
 
 console = Console()
@@ -37,12 +38,71 @@ ConfigOption = Annotated[
 def scan(
     path: Annotated[Path, typer.Argument(help="File or directory path to scan.")],
     config: ConfigOption = None,
+    blocklist: Annotated[
+        Path | None,
+        typer.Option("--blocklist", "-b", help="Extra SHA256 blocklist JSON file."),
+    ] = None,
+    rules: Annotated[
+        Path | None,
+        typer.Option("--rules", "-r", help="Directory of YARA .yar rule files."),
+    ] = None,
 ) -> None:
-    """Scan a file or directory for threats."""
+    """Scan a file or directory for threats using hash, PE, and YARA engines."""
+    from jka_antivirus.scanner import ScanProgressCallback, run_scan  # noqa: PLC0415
+
+    if not path.exists():
+        console.print(f"[red]Path does not exist:[/red] {path}")
+        raise typer.Exit(1)
+
+    settings = load_settings(config)
+    setup_logging(settings.app.log_level, log_dir=settings.app.data_dir / "logs")
+
+    db_path = settings.database.path
+    if not db_path.exists():
+        console.print("[yellow]Database not found. Running init-db first...[/yellow]")
+        asyncio.run(init_db(db_path))
+
+    with Progress(
+        SpinnerColumn(),
+        TextColumn("[progress.description]{task.description}"),
+        BarColumn(),
+        TextColumn("{task.completed}/{task.total}"),
+        TimeElapsedColumn(),
+        console=console,
+        transient=True,
+    ) as progress:
+        task = progress.add_task("Scanning...", total=None)
+
+        def on_progress(current: int, total: int, current_path: Path) -> None:
+            progress.update(
+                task,
+                total=total,
+                completed=current,
+                description=f"[cyan]{current_path.name}[/cyan]",
+            )
+
+        callback: ScanProgressCallback = on_progress
+        summary = asyncio.run(
+            run_scan(
+                target=path,
+                db_path=db_path,
+                blocklist_path=blocklist,
+                rules_dir=rules,
+                on_progress=callback,
+            )
+        )
+
+    color = "red" if summary.threats_found > 0 else "green"
     console.print(
-        "[yellow]Static scan engine arrives in Phase 2.[/yellow]"
-        f" (target: {path})"
+        f"\n[bold]Scan complete.[/bold] "
+        f"Files scanned: [cyan]{summary.files_scanned}[/cyan]  "
+        f"Threats found: [{color}]{summary.threats_found}[/{color}]"
     )
+    if summary.threats_found > 0:
+        console.print(
+            f"[dim]Run [bold]jka status[/bold] or query the database "
+            f"(scan_run_id={summary.run_id}) for details.[/dim]"
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -90,7 +150,7 @@ def init_db_cmd(config: ConfigOption = None) -> None:
 @quarantine_app.command(name="list")
 def quarantine_list() -> None:
     """List quarantined files."""
-    console.print("[yellow]Quarantine engine arrives in Phase 2.[/yellow]")
+    console.print("[yellow]Quarantine engine arrives in Phase 3.[/yellow]")
 
 
 # ---------------------------------------------------------------------------

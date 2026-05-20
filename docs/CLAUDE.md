@@ -7,17 +7,25 @@ Read this file first. It gives you everything needed to continue work on this pr
 A layered, defense-in-depth antivirus engine for Windows 11, written in Python 3.11+.
 It is intended to run as a Windows service (Phase 7). The codebase is fully typed, async-first for I/O, and modular so each detection layer can be developed and tested independently.
 
-## Current state (Phase 1, completed)
+## Current state (Phase 2, completed)
 
-Phase 1 delivered the foundation only. No detection logic exists yet.
+Phase 2 delivers the static analysis layer. `jka scan` is now fully functional.
 
-Completed:
+**Phase 1 foundation (still present):**
 - `src/jka_antivirus/config.py`: Pydantic v2 BaseSettings, loads `config/config.yaml` then applies `JKA_` env var overrides.
 - `src/jka_antivirus/logging_setup.py`: Rich console handler + RotatingFileHandler, called once at CLI startup.
 - `src/jka_antivirus/db/schema.sql`: Four tables (`scan_runs`, `detections`, `quarantine_items`, `event_log`) with indexes and foreign keys.
 - `src/jka_antivirus/db/connection.py`: `init_db`, `get_connection` (async context manager), `get_table_counts`.
-- `src/jka_antivirus/cli.py`: Typer app. `jka init-db` and `jka status` are functional; `jka scan` and `jka quarantine list` are stubs.
-- `tests/test_config.py` and `tests/test_db.py`: pytest-asyncio test suite covering all Phase 1 code.
+
+**Phase 2 additions:**
+- `src/jka_antivirus/engines/base.py`: `BaseEngine` ABC and `EngineResult` dataclass. All engines implement `analyze(path) -> EngineResult`.
+- `src/jka_antivirus/engines/hash_engine.py`: SHA256/MD5 hash computation; checks against a JSON blocklist. Bundled empty blocklist at `engines/data/hash_blocklist.json`.
+- `src/jka_antivirus/engines/pe_engine.py`: Uses `pefile` to score Windows executables on: zero/future timestamps, high-entropy sections (>7.2), suspicious imports (VirtualAllocEx, WriteProcessMemory, etc.), missing import table, large overlay, TLS callbacks.
+- `src/jka_antivirus/engines/yara_engine.py`: Compiles all `.yar`/`.yara` files from `rules/` and matches against file bytes (reads bytes then passes `data=` to avoid Windows path issues). Gracefully no-ops when rules dir is empty.
+- `src/jka_antivirus/scanner.py`: Orchestrator. Collects files (skips `.log .tmp .txt` etc., max 256 MB), runs all engines, merges verdicts (malicious > suspicious > unknown > clean), writes `scan_runs` + `detections` rows to DB.
+- `rules/common_malware.yar`: Five starter YARA rules (download-and-execute, keylogger, process injection, anti-debug, EICAR test marker).
+- `src/jka_antivirus/cli.py`: `jka scan <path> [--blocklist] [--rules]` is functional with a rich progress bar. `jka quarantine list` stub moved to Phase 3.
+- `tests/test_engines.py`: 19 new tests covering all engines and the scanner orchestrator.
 
 ## Phase plan at a glance
 

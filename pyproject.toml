@@ -4,8 +4,8 @@ build-backend = "hatchling.build"
 
 [project]
 name = "jka-antivirus"
-version = "0.1.0"
-description = "jka_antivirus: layered Windows antivirus engine (Phase 1 scaffold)"
+version = "0.2.0"
+description = "jka_antivirus: layered Windows antivirus engine (Phase 2 static analysis)"
 requires-python = ">=3.11"
 dependencies = [
     "typer>=0.12.0",
@@ -15,6 +15,8 @@ dependencies = [
     "pyyaml>=6.0.0",
     "aiosqlite>=0.20.0",
     "python-dotenv>=1.0.0",
+    "pefile>=2023.2.7",
+    "yara-python>=4.3.0",
 ]
 
 [project.scripts]
@@ -30,6 +32,7 @@ dev = [
     "ruff>=0.6.0",
     "mypy>=1.11.0",
     "types-PyYAML>=6.0.0",
+    "types-pefile>=2023.2.7",
 ]
 
 [tool.pytest.ini_options]
@@ -51,3 +54,7 @@ strict = true
 python_version = "3.11"
 mypy_path = "src"
 packages = ["jka_antivirus"]
+
+[[tool.mypy.overrides]]
+module = ["pefile", "yara"]
+ignore_missing_imports = true
