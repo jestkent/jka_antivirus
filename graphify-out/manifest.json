@@ -1,0 +1,58 @@
+{
+  "D:\\Desktop\\jka_antivirus\\src\\jka_antivirus\\cli.py": {
+    "mtime": 1779258318.7713249,
+    "hash": "c5dfe28c0153c9332151db2ee1e97064"
+  },
+  "D:\\Desktop\\jka_antivirus\\src\\jka_antivirus\\config.py": {
+    "mtime": 1779258203.9994295,
+    "hash": "16b302e8d2fa254a1a39ca95a3364afd"
+  },
+  "D:\\Desktop\\jka_antivirus\\src\\jka_antivirus\\logging_setup.py": {
+    "mtime": 1779257811.4297178,
+    "hash": "d12300eb13c53204bed523a13e4e987d"
+  },
+  "D:\\Desktop\\jka_antivirus\\src\\jka_antivirus\\__init__.py": {
+    "mtime": 1779257773.3941994,
+    "hash": "af360823a4919dd7dd7b2fcce881de04"
+  },
+  "D:\\Desktop\\jka_antivirus\\src\\jka_antivirus\\db\\connection.py": {
+    "mtime": 1779258313.6094143,
+    "hash": "3ca1b02bbda35af1ac96e674f4decd40"
+  },
+  "D:\\Desktop\\jka_antivirus\\src\\jka_antivirus\\db\\schema.sql": {
+    "mtime": 1779257841.7668378,
+    "hash": "e4f754ac96369a57d42d88a9110cb984"
+  },
+  "D:\\Desktop\\jka_antivirus\\src\\jka_antivirus\\db\\__init__.py": {
+    "mtime": 1779257824.4362917,
+    "hash": "cc38bd78a66ce097c5091b3887243427"
+  },
+  "D:\\Desktop\\jka_antivirus\\tests\\test_config.py": {
+    "mtime": 1779258270.108061,
+    "hash": "c3ca61bb86488139c782f8ddd0f12800"
+  },
+  "D:\\Desktop\\jka_antivirus\\tests\\test_db.py": {
+    "mtime": 1779258277.1365309,
+    "hash": "cb48680d92de744bea033d4705436ba0"
+  },
+  "D:\\Desktop\\jka_antivirus\\tests\\__init__.py": {
+    "mtime": 1779257907.9801161,
+    "hash": "85951f13a9a72ac6eaac833881f1313d"
+  },
+  "D:\\Desktop\\jka_antivirus\\README.md": {
+    "mtime": 1779258013.2796228,
+    "hash": "af5ec0f1fcb1c676552d5145c8ec732b"
+  },
+  "D:\\Desktop\\jka_antivirus\\config\\config.yaml": {
+    "mtime": 1779257778.4524062,
+    "hash": "9d6a66c67dc79f5efcedc65faecea157"
+  },
+  "D:\\Desktop\\jka_antivirus\\docs\\ARCHITECTURE.md": {
+    "mtime": 1779257976.7391608,
+    "hash": "f3bd92d740e3572b90799557c4a8fa31"
+  },
+  "D:\\Desktop\\jka_antivirus\\docs\\CLAUDE.md": {
+    "mtime": 1779257999.9683535,
+    "hash": "41de2698f54629abaf509d95d779993c"
+  }
+}
