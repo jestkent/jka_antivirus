@@ -23,8 +23,15 @@ ScanProgressCallback = Callable[[int, int, Path], None]
 
 _SKIP_EXTENSIONS = frozenset(
     {
+        # Plaintext and config formats — not executable, high false-positive risk
         ".lnk", ".tmp", ".log", ".bak", ".ini", ".cfg", ".xml",
         ".json", ".yaml", ".yml", ".toml", ".csv", ".txt",
+        # Source code and bytecode — YARA string rules false-positive on security
+        # tool source that lists suspicious API names as data, not as calls
+        ".py", ".pyc", ".pyo", ".pyd",
+        ".js", ".ts", ".rb", ".go", ".rs", ".java", ".cs", ".cpp", ".c", ".h",
+        # YARA rule files themselves contain the strings they search for
+        ".yar", ".yara",
     }
 )
 
