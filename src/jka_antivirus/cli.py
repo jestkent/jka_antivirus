@@ -145,6 +145,34 @@ def init_db_cmd(config: ConfigOption = None) -> None:
 
 
 # ---------------------------------------------------------------------------
+# jka dashboard
+# ---------------------------------------------------------------------------
+@app.command()
+def dashboard(
+    config: ConfigOption = None,
+    port: Annotated[int, typer.Option("--port", "-p", help="Port to listen on.")] = 8080,
+    host: Annotated[str, typer.Option("--host", help="Host to bind.")] = "127.0.0.1",
+) -> None:
+    """Start the browser dashboard (opens at http://localhost:<port>)."""
+    import webbrowser  # noqa: PLC0415
+
+    import uvicorn  # noqa: PLC0415
+
+    from jka_antivirus.dashboard import app as dash_app  # noqa: PLC0415
+    from jka_antivirus.dashboard import configure
+
+    settings = load_settings(config)
+    setup_logging(settings.app.log_level, log_dir=settings.app.data_dir / "logs")
+    configure(settings.database.path)
+
+    url = f"http://{host}:{port}"
+    console.print(f"[bold]jka_antivirus Dashboard[/bold] running at [cyan]{url}[/cyan]")
+    console.print("[dim]Press Ctrl+C to stop.[/dim]")
+    webbrowser.open(url)
+    uvicorn.run(dash_app, host=host, port=port, log_level="warning")
+
+
+# ---------------------------------------------------------------------------
 # jka quarantine list
 # ---------------------------------------------------------------------------
 @quarantine_app.command(name="list")
