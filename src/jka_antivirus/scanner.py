@@ -1,4 +1,4 @@
-"""Scanner orchestrator: walks a path, runs all engines, writes results to DB."""
+"""Scanner orchestrator: walks a path, runs all engines concurrently, writes results to DB."""
 
 from __future__ import annotations
 
@@ -6,6 +6,7 @@ import asyncio
 import json
 import logging
 from collections.abc import Callable
+from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -54,7 +55,7 @@ def _merge_results(results: list[EngineResult]) -> tuple[str, float, dict[str, o
     return final_verdict, final_score, reasoning
 
 
-def _collect_files(target: Path) -> list[Path]:
+def _collect_files(target: Path, max_file_size: int = _MAX_FILE_SIZE) -> list[Path]:
     """Return all scannable files under target, applying size and extension filters."""
     if target.is_file():
         return [target]
@@ -69,7 +70,7 @@ def _collect_files(target: Path) -> list[Path]:
             size = path.stat().st_size
         except OSError:
             continue
-        if size > _MAX_FILE_SIZE:
+        if size > max_file_size:
             logger.debug("Skipping oversized file: %s (%d bytes)", path, size)
             continue
         files.append(path)
@@ -80,7 +81,8 @@ def _build_engines(
     blocklist_path: Path | None,
     rules_dir: Path | None,
 ) -> list[BaseEngine]:
-    return [HashEngine(blocklist_path), PEEngine(), YaraEngine(rules_dir)]
+    from jka_antivirus.engines.ai_engine import AIEngine  # noqa: PLC0415
+    return [HashEngine(blocklist_path), PEEngine(), YaraEngine(rules_dir), AIEngine()]
 
 
 async def _insert_scan_run(conn: aiosqlite.Connection, started_at: str) -> int:
@@ -146,14 +148,67 @@ class ScanSummary:
         self.target = target
 
 
+async def _scan_file(
+    file_path: Path,
+    engines: list[BaseEngine],
+    executor: ThreadPoolExecutor,
+    semaphore: asyncio.Semaphore,
+    conn: aiosqlite.Connection,
+    db_lock: asyncio.Lock,
+    run_id: int,
+    counters: dict[str, int],
+    on_progress: ScanProgressCallback | None,
+    total: int,
+) -> None:
+    """Scan a single file under the concurrency semaphore and write results."""
+    async with semaphore:
+        loop = asyncio.get_event_loop()
+
+        idx = counters["idx"]
+        counters["idx"] += 1
+        if on_progress:
+            on_progress(idx, total, file_path)
+
+        try:
+            sha256, md5 = await loop.run_in_executor(executor, compute_hashes, file_path)
+        except OSError as exc:
+            logger.warning("Cannot hash %s: %s", file_path, exc)
+            counters["scanned"] += 1
+            return
+
+        applicable = [e for e in engines if e.can_analyze(file_path)]
+        results: list[EngineResult] = []
+        for engine in applicable:
+            try:
+                result = await loop.run_in_executor(executor, engine.analyze, file_path)
+                results.append(result)
+            except Exception as exc:  # noqa: BLE001
+                logger.warning("Engine %s failed on %s: %s", engine.name, file_path, exc)
+
+        counters["scanned"] += 1
+        if not results:
+            return
+
+        verdict, score, reasoning = _merge_results(results)
+
+        if verdict in ("suspicious", "malicious"):
+            counters["threats"] += 1
+            async with db_lock:
+                await _insert_detection(
+                    conn, run_id, file_path, sha256, md5, verdict, score, reasoning
+                )
+                await conn.commit()
+
+
 async def run_scan(
     target: Path,
     db_path: Path,
     blocklist_path: Path | None = None,
     rules_dir: Path | None = None,
     on_progress: ScanProgressCallback | None = None,
+    workers: int = 4,
 ) -> ScanSummary:
-    """Run all engines against target and persist results to the database.
+    """Run all engines against target concurrently and persist results to the database.
 
     Args:
         target: File or directory to scan.
@@ -161,6 +216,7 @@ async def run_scan(
         blocklist_path: Optional extra hash blocklist JSON file.
         rules_dir: Optional directory of YARA .yar/.yara rule files.
         on_progress: Optional callback(current, total, path) for UI updates.
+        workers: Number of files to process in parallel.
 
     Returns:
         ScanSummary with counts and the scan_run_id.
@@ -169,53 +225,39 @@ async def run_scan(
     files = _collect_files(target)
     total = len(files)
     started_at = _now_iso()
-    files_scanned = 0
-    threats_found = 0
+
+    counters: dict[str, int] = {"idx": 0, "scanned": 0, "threats": 0}
+    semaphore = asyncio.Semaphore(workers)
+    db_lock = asyncio.Lock()
 
     async with get_connection(db_path) as conn:
         run_id = await _insert_scan_run(conn, started_at)
 
-        for idx, file_path in enumerate(files):
-            if on_progress:
-                on_progress(idx, total, file_path)
-
-            try:
-                sha256, md5 = compute_hashes(file_path)
-            except OSError as exc:
-                logger.warning("Cannot hash %s: %s", file_path, exc)
-                continue
-
-            applicable = [e for e in engines if e.can_analyze(file_path)]
-            results: list[EngineResult] = []
-            for engine in applicable:
-                try:
-                    result = await asyncio.get_event_loop().run_in_executor(
-                        None, engine.analyze, file_path
-                    )
-                    results.append(result)
-                except Exception as exc:  # noqa: BLE001
-                    logger.warning("Engine %s failed on %s: %s", engine.name, file_path, exc)
-
-            if not results:
-                files_scanned += 1
-                continue
-
-            verdict, score, reasoning = _merge_results(results)
-
-            if verdict in ("suspicious", "malicious"):
-                threats_found += 1
-                await _insert_detection(
-                    conn, run_id, file_path, sha256, md5, verdict, score, reasoning
+        with ThreadPoolExecutor(max_workers=workers) as executor:
+            tasks = [
+                _scan_file(
+                    file_path=f,
+                    engines=engines,
+                    executor=executor,
+                    semaphore=semaphore,
+                    conn=conn,
+                    db_lock=db_lock,
+                    run_id=run_id,
+                    counters=counters,
+                    on_progress=on_progress,
+                    total=total,
                 )
-                await conn.commit()
+                for f in files
+            ]
+            await asyncio.gather(*tasks)
 
-            files_scanned += 1
-
-        await _update_scan_run(conn, run_id, _now_iso(), files_scanned, threats_found, "completed")
+        await _update_scan_run(
+            conn, run_id, _now_iso(), counters["scanned"], counters["threats"], "completed"
+        )
 
     return ScanSummary(
         run_id=run_id,
-        files_scanned=files_scanned,
-        threats_found=threats_found,
+        files_scanned=counters["scanned"],
+        threats_found=counters["threats"],
         target=target,
     )

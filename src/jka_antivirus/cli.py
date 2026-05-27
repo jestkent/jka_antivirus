@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 from pathlib import Path
 from typing import Annotated
 
@@ -24,6 +25,7 @@ quarantine_app = typer.Typer(help="Quarantine vault management (Phase 3+).")
 app.add_typer(quarantine_app, name="quarantine")
 
 console = Console()
+logger = logging.getLogger(__name__)
 
 ConfigOption = Annotated[
     Path | None,
@@ -89,6 +91,7 @@ def scan(
                 blocklist_path=blocklist,
                 rules_dir=rules,
                 on_progress=callback,
+                workers=settings.scan.workers,
             )
         )
 
@@ -142,6 +145,107 @@ def init_db_cmd(config: ConfigOption = None) -> None:
     console.print(f"Initialising database at [bold]{db_path}[/bold] ...")
     asyncio.run(init_db(db_path))
     console.print("[green]Database ready.[/green] All tables and indexes created.")
+
+
+# ---------------------------------------------------------------------------
+# jka watch
+# ---------------------------------------------------------------------------
+@app.command()
+def watch(
+    path: Annotated[Path, typer.Argument(help="Directory to monitor for new/changed files.")],
+    config: ConfigOption = None,
+    rules: Annotated[
+        Path | None,
+        typer.Option("--rules", "-r", help="Directory of YARA .yar rule files."),
+    ] = None,
+    blocklist: Annotated[
+        Path | None,
+        typer.Option("--blocklist", "-b", help="Extra SHA256 blocklist JSON file."),
+    ] = None,
+) -> None:
+    """Watch a directory and auto-scan every new or modified file in real time."""
+    import queue  # noqa: PLC0415
+    import threading  # noqa: PLC0415
+
+    from watchdog.events import FileSystemEvent, FileSystemEventHandler  # noqa: PLC0415
+    from watchdog.observers import Observer  # noqa: PLC0415
+
+    from jka_antivirus.scanner import _SKIP_EXTENSIONS, run_scan  # noqa: PLC0415
+
+    if not path.exists() or not path.is_dir():
+        console.print(f"[red]Path must be an existing directory:[/red] {path}")
+        raise typer.Exit(1)
+
+    settings = load_settings(config)
+    setup_logging(settings.app.log_level, log_dir=settings.app.data_dir / "logs")
+
+    db_path = settings.database.path
+    if not db_path.exists():
+        asyncio.run(init_db(db_path))
+
+    pending: queue.Queue[Path] = queue.Queue()
+
+    class _Handler(FileSystemEventHandler):
+        def _enqueue(self, event: FileSystemEvent) -> None:
+            p = Path(str(event.src_path))
+            if p.is_file() and p.suffix.lower() not in _SKIP_EXTENSIONS:
+                pending.put(p)
+
+        def on_created(self, event: FileSystemEvent) -> None:
+            self._enqueue(event)
+
+        def on_modified(self, event: FileSystemEvent) -> None:
+            self._enqueue(event)
+
+    observer = Observer()
+    observer.schedule(_Handler(), str(path), recursive=True)
+    observer.start()
+
+    console.print(
+        f"[bold green]Watching[/bold green] [cyan]{path}[/cyan]  "
+        f"(Ctrl+C to stop)"
+    )
+
+    stop_event = threading.Event()
+
+    def _scan_loop() -> None:
+        while not stop_event.is_set():
+            try:
+                file_path = pending.get(timeout=1)
+            except queue.Empty:
+                continue
+            console.print(f"  [yellow]scan[/yellow] {file_path.name}")
+            try:
+                summary = asyncio.run(
+                    run_scan(
+                        target=file_path,
+                        db_path=db_path,
+                        blocklist_path=blocklist,
+                        rules_dir=rules,
+                        workers=settings.scan.workers,
+                    )
+                )
+                color = "red" if summary.threats_found else "green"
+                verdict_label = "THREAT" if summary.threats_found else "clean"
+                console.print(
+                    f"  [{color}]{verdict_label}[/{color}] {file_path.name}"
+                )
+            except Exception as exc:  # noqa: BLE001
+                logger.warning("Watch scan failed for %s: %s", file_path, exc)
+
+    scan_thread = threading.Thread(target=_scan_loop, daemon=True)
+    scan_thread.start()
+
+    try:
+        while observer.is_alive():
+            observer.join(timeout=1)
+    except KeyboardInterrupt:
+        pass
+    finally:
+        stop_event.set()
+        observer.stop()
+        observer.join()
+        console.print("\n[dim]Watch stopped.[/dim]")
 
 
 # ---------------------------------------------------------------------------

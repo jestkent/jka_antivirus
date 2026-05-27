@@ -35,6 +35,11 @@ class QuarantineConfig(BaseModel):
     retention_days: int = Field(default=30, ge=1)
 
 
+class ScanConfig(BaseModel):
+    workers: int = Field(default=4, ge=1, le=32)
+    max_file_size_mb: int = Field(default=256, ge=1)
+
+
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(
         env_prefix="JKA_",
@@ -48,6 +53,7 @@ class Settings(BaseSettings):
     app: AppConfig = Field(default_factory=AppConfig)
     database: DatabaseConfig = Field(default_factory=DatabaseConfig)
     quarantine: QuarantineConfig = Field(default_factory=QuarantineConfig)
+    scan: ScanConfig = Field(default_factory=ScanConfig)
 
 
 def _load_yaml(path: Path) -> dict[str, Any]:

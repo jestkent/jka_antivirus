@@ -10,8 +10,11 @@ quarantine:
   vault_path: ./data/quarantine
   retention_days: 30
 
+scan:
+  workers: 4           # parallel files processed at once (increase on fast SSDs)
+  max_file_size_mb: 256
+
 # Future sections (populated in later phases):
-static: {}
 behavioral: {}
 network: {}
 cloud: {}
