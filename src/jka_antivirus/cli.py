@@ -148,6 +148,134 @@ def init_db_cmd(config: ConfigOption = None) -> None:
 
 
 # ---------------------------------------------------------------------------
+# jka scan-threats  (targeted high-risk location scan)
+# ---------------------------------------------------------------------------
+
+# Directories where trojans, RATs, worms, and ransomware typically hide
+# on Windows — writable by users, often ignored by quick Defender scans.
+_THREAT_PATHS = [
+    Path(r"C:\Users") / "{user}" / "AppData" / "Roaming",
+    Path(r"C:\Users") / "{user}" / "AppData" / "Local" / "Temp",
+    Path(r"C:\Users") / "{user}" / "AppData" / "Local" / "Microsoft" / "Windows" / "INetCache",
+    Path(r"C:\Users") / "{user}" / "AppData" / "Roaming"
+    / "Microsoft" / "Windows" / "Start Menu" / "Programs" / "Startup",
+    Path(r"C:\Windows") / "Temp",
+    Path(r"C:\Windows") / "System32" / "Tasks",
+    Path(r"C:\Windows") / "System32" / "drivers",
+    Path(r"C:\ProgramData"),
+    Path(r"C:\Users") / "Public",
+    Path(r"C:\Temp"),
+]
+
+
+def _resolve_threat_paths() -> list[Path]:
+    import os  # noqa: PLC0415
+    user = os.environ.get("USERNAME", os.environ.get("USER", ""))
+    resolved: list[Path] = []
+    for p in _THREAT_PATHS:
+        final = Path(str(p).replace("{user}", user))
+        if final.exists():
+            resolved.append(final)
+    return resolved
+
+
+@app.command(name="scan-threats")
+def scan_threats(
+    config: ConfigOption = None,
+    rules: Annotated[
+        Path | None,
+        typer.Option("--rules", "-r", help="Directory of YARA .yar rule files."),
+    ] = None,
+    blocklist: Annotated[
+        Path | None,
+        typer.Option("--blocklist", "-b", help="Extra SHA256 blocklist JSON file."),
+    ] = None,
+) -> None:
+    """Scan high-risk Windows locations where trojans, RATs, and worms typically hide."""
+    from jka_antivirus.scanner import ScanProgressCallback, run_scan  # noqa: PLC0415
+
+    settings = load_settings(config)
+    setup_logging(settings.app.log_level, log_dir=settings.app.data_dir / "logs")
+
+    db_path = settings.database.path
+    if not db_path.exists():
+        asyncio.run(init_db(db_path))
+
+    targets = _resolve_threat_paths()
+    if not targets:
+        console.print("[red]No threat paths found on this system.[/red]")
+        raise typer.Exit(1)
+
+    # Default to bundled rules dir when --rules not supplied
+    rules_dir = rules
+    if rules_dir is None:
+        here = Path(__file__).parent
+        for _ in range(6):
+            candidate = here.parent / "rules"
+            if candidate.exists():
+                rules_dir = candidate
+                break
+            here = here.parent
+
+    console.print("[bold]Scanning high-risk locations...[/bold]")
+    for p in targets:
+        console.print(f"  [dim]{p}[/dim]")
+    console.print()
+
+    total_threats = 0
+    total_files = 0
+
+    for target in targets:
+        with Progress(
+            SpinnerColumn(),
+            TextColumn("[progress.description]{task.description}"),
+            BarColumn(),
+            TextColumn("{task.completed}/{task.total}"),
+            TimeElapsedColumn(),
+            console=console,
+            transient=True,
+        ) as progress:
+            task_id = progress.add_task(f"[cyan]{target.name}[/cyan]", total=None)
+
+            from rich.progress import TaskID  # noqa: PLC0415
+
+            def _make_cb(tid: TaskID) -> ScanProgressCallback:
+                def _cb(current: int, total: int, current_path: Path) -> None:
+                    desc = f"[cyan]{current_path.name}[/cyan]"
+                    progress.update(tid, total=total, completed=current, description=desc)
+                return _cb
+
+            callback: ScanProgressCallback = _make_cb(task_id)
+            summary = asyncio.run(
+                run_scan(
+                    target=target,
+                    db_path=db_path,
+                    blocklist_path=blocklist,
+                    rules_dir=rules_dir,
+                    on_progress=callback,
+                    workers=settings.scan.workers,
+                )
+            )
+
+        color = "red" if summary.threats_found > 0 else "green"
+        console.print(
+            f"  {target.name}: files=[cyan]{summary.files_scanned}[/cyan]  "
+            f"threats=[{color}]{summary.threats_found}[/{color}]"
+        )
+        total_threats += summary.threats_found
+        total_files += summary.files_scanned
+
+    console.print()
+    color = "red" if total_threats > 0 else "green"
+    console.print(
+        f"[bold]Done.[/bold] Total files: [cyan]{total_files}[/cyan]  "
+        f"Total threats: [{color}]{total_threats}[/{color}]"
+    )
+    if total_threats > 0:
+        console.print("[dim]Open the dashboard to review detections: jka dashboard[/dim]")
+
+
+# ---------------------------------------------------------------------------
 # jka watch
 # ---------------------------------------------------------------------------
 @app.command()
