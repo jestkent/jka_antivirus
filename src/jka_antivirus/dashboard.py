@@ -176,7 +176,8 @@ _HTML = """<!DOCTYPE html>
   * { box-sizing: border-box; margin: 0; padding: 0; }
   body { background: var(--bg); color: var(--text); font-family: 'Segoe UI', system-ui, sans-serif; font-size: 14px; }
   a { color: var(--accent); text-decoration: none; }
-  header { background: var(--surface); border-bottom: 1px solid var(--border); padding: 14px 24px; display: flex; align-items: center; gap: 12px; }
+  header { background: var(--surface); border-bottom: 1px solid var(--border); padding: 14px 24px; display: flex; align-items: center; justify-content: space-between; }
+  .header-left { display: flex; align-items: center; gap: 12px; }
   header h1 { font-size: 18px; font-weight: 700; letter-spacing: -0.3px; }
   header span.sub { color: var(--muted); font-size: 12px; }
   .badge-live { background: var(--green); color: #000; font-size: 10px; font-weight: 700; padding: 2px 7px; border-radius: 99px; }
@@ -220,18 +221,36 @@ _HTML = """<!DOCTYPE html>
   pre.reasoning { background: var(--bg); border: 1px solid var(--border); border-radius: 8px; padding: 14px; font-size: 12px; color: var(--text); overflow-x: auto; white-space: pre-wrap; }
   .empty { padding: 40px; text-align: center; color: var(--muted); }
   .refresh-note { color: var(--muted); font-size: 11px; }
+  .header-actions { display: flex; gap: 8px; }
+  .btn { display: inline-flex; align-items: center; gap: 6px; padding: 6px 14px; border-radius: 7px; font-size: 12px; font-weight: 600; cursor: pointer; border: 1px solid var(--border); background: var(--bg); color: var(--text); transition: background 0.15s; }
+  .btn:hover { background: var(--border); }
+  .btn.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+  .btn.primary:hover { background: #4f52c8; }
+  .btn.success { background: rgba(34,197,94,0.15); border-color: rgba(34,197,94,0.4); color: var(--green); }
   @media (max-width: 768px) { .stats { grid-template-columns: repeat(2, 1fr); } }
 </style>
 </head>
 <body>
 <header>
-  <svg width="28" height="28" viewBox="0 0 28 28" fill="none">
-    <rect width="28" height="28" rx="8" fill="#6366f1"/>
-    <path d="M14 5L20 8.5V15.5C20 18.5 17.5 21.2 14 22C10.5 21.2 8 18.5 8 15.5V8.5L14 5Z" fill="white" opacity="0.9"/>
-  </svg>
-  <h1>jka_antivirus</h1>
-  <span class="sub">Dashboard</span>
-  <span class="badge-live">LIVE</span>
+  <div class="header-left">
+    <svg width="28" height="28" viewBox="0 0 28 28" fill="none">
+      <rect width="28" height="28" rx="8" fill="#6366f1"/>
+      <path d="M14 5L20 8.5V15.5C20 18.5 17.5 21.2 14 22C10.5 21.2 8 18.5 8 15.5V8.5L14 5Z" fill="white" opacity="0.9"/>
+    </svg>
+    <h1>jka_antivirus</h1>
+    <span class="sub">Dashboard</span>
+    <span class="badge-live">LIVE</span>
+  </div>
+  <div class="header-actions">
+    <button class="btn" onclick="copyReport(this)" title="Copy a plain-text report to clipboard for ChatGPT">
+      <svg width="14" height="14" viewBox="0 0 16 16" fill="none"><rect x="5" y="5" width="9" height="9" rx="2" stroke="currentColor" stroke-width="1.5"/><path d="M3 11V3a2 2 0 012-2h6" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>
+      Copy Report
+    </button>
+    <button class="btn primary" onclick="downloadReport()" title="Download report as .txt file">
+      <svg width="14" height="14" viewBox="0 0 16 16" fill="none"><path d="M8 2v8m0 0l-3-3m3 3l3-3" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/><path d="M2 12v1a1 1 0 001 1h10a1 1 0 001-1v-1" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>
+      Download .txt
+    </button>
+  </div>
 </header>
 
 <main>
@@ -406,6 +425,94 @@ async function refresh() {
 
 refresh();
 setInterval(refresh, 10000);
+
+// ---------------------------------------------------------------------------
+// Report builder
+// ---------------------------------------------------------------------------
+function buildReportText() {
+  const now = new Date().toLocaleString();
+  const runs  = document.getElementById('s-runs').textContent;
+  const files = document.getElementById('s-files').textContent;
+  const threats = document.getElementById('s-threats').textContent;
+  const quarantine = document.getElementById('s-quarantine').textContent;
+
+  let lines = [];
+  lines.push('jka_antivirus Scan Report');
+  lines.push('Generated: ' + now);
+  lines.push('');
+  lines.push('=== SUMMARY ===');
+  lines.push('Total scan runs    : ' + runs);
+  lines.push('Total files scanned: ' + files);
+  lines.push('Total detections   : ' + threats);
+  lines.push('Quarantined files  : ' + quarantine);
+  lines.push('');
+
+  // Scan runs from the table
+  lines.push('=== RECENT SCAN RUNS ===');
+  const scanRows = document.querySelectorAll('#scans-body tr');
+  scanRows.forEach(tr => {
+    const cells = tr.querySelectorAll('td');
+    if (cells.length < 6) return;
+    lines.push(
+      [cells[0].textContent, cells[1].textContent, 'files:' + cells[3].textContent.trim(),
+       'threats:' + cells[4].textContent.trim(), cells[5].textContent.trim()].join(' | ')
+    );
+  });
+  lines.push('');
+
+  // Detections
+  const label = _detRows.length > 0
+    ? `=== DETECTIONS (${_detRows.length} shown) ===`
+    : '=== DETECTIONS (none loaded — apply a filter first if needed) ===';
+  lines.push(label);
+  _detRows.forEach(r => {
+    const fname = r.file_path ? r.file_path.replace(/\\/g, '/').split('/').pop() : '—';
+    const score = Math.round((r.score ?? 0) * 100);
+    lines.push('');
+    lines.push(`  [${(r.verdict ?? '').toUpperCase()}] ${fname}  (score: ${score}%)`);
+    lines.push(`  Path   : ${r.file_path ?? '—'}`);
+    lines.push(`  SHA-256: ${r.sha256 ?? '—'}`);
+    lines.push(`  Run #${r.scan_run_id}  Detected: ${fmtDate(r.detected_at)}`);
+    if (r.reasoning && typeof r.reasoning === 'object') {
+      Object.entries(r.reasoning).forEach(([engine, data]) => {
+        const d = data;
+        const v = d.verdict ?? '?';
+        const s = Math.round((d.score ?? 0) * 100);
+        const inds = Array.isArray(d.indicators) && d.indicators.length
+          ? '  -> ' + d.indicators.slice(0, 3).join('; ')
+          : '';
+        lines.push(`  Engine [${engine}]: ${v} ${s}%${inds}`);
+      });
+    }
+  });
+  lines.push('');
+  lines.push('--- end of report ---');
+  return lines.join('\\n');
+}
+
+async function copyReport(btn) {
+  const text = buildReportText();
+  try {
+    await navigator.clipboard.writeText(text);
+    const orig = btn.innerHTML;
+    btn.classList.add('success');
+    btn.textContent = 'Copied!';
+    setTimeout(() => { btn.classList.remove('success'); btn.innerHTML = orig; }, 2000);
+  } catch {
+    prompt('Copy this report:', text);
+  }
+}
+
+function downloadReport() {
+  const text = buildReportText();
+  const ts = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
+  const blob = new Blob([text], { type: 'text/plain' });
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = `jka_report_${ts}.txt`;
+  a.click();
+  URL.revokeObjectURL(a.href);
+}
 </script>
 </body>
 </html>"""
